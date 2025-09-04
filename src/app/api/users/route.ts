@@ -36,27 +36,50 @@ async function fetchAllUsers(
 
   try {
     do {
-      const url = new URL(`https://api.airtable.com/v0/${baseId}/${tableId}`);
+      const baseUrl = `https://api.airtable.com/v0/${baseId}/${tableId}`;
 
-      if (offset) {
-        url.searchParams.append('offset', offset);
+      const buildUrl = (includeFields: boolean) => {
+        const u = new URL(baseUrl);
+        if (offset) {
+          u.searchParams.append('offset', offset);
+        }
+        if (includeFields) {
+          u.searchParams.append('fields[]', 'Nome');
+          u.searchParams.append('fields[]', 'Email');
+          u.searchParams.append('fields[]', 'Ruolo');
+          u.searchParams.append('fields[]', 'Avatar');
+          u.searchParams.append('fields[]', 'Telefono');
+        }
+        return u;
+      };
+
+      let response: Response;
+
+      const doFetch = async (fullUrl: string) =>
+        fetch(fullUrl, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          next: { revalidate: 300 },
+        });
+
+      // First attempt with fields[]
+      const urlTryFields = buildUrl(true);
+      console.log('🔗 Fetching users from:', urlTryFields.toString());
+      response = await doFetch(urlTryFields.toString());
+
+      // Fallback: remove fields[] if Airtable rejects with 422
+      if (response.status === 422) {
+        console.warn('⚠️ Airtable 422 with fields[] filter. Retrying without fields...');
+        const urlNoFields = buildUrl(false);
+        console.log('🔁 Retrying users fetch:', urlNoFields.toString());
+        response = await doFetch(urlNoFields.toString());
       }
 
-      console.log('🔗 Fetching users from:', url.toString());
-
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
       if (!response.ok) {
-        console.error(
-          '❌ Airtable API error:',
-          response.status,
-          response.statusText
-        );
+        const errText = await response.text();
+        console.error('❌ Airtable API error:', response.status, errText);
         throw new Error(
           `Airtable API error: ${response.status} ${response.statusText}`
         );
